@@ -222,8 +222,11 @@ public class AngryBirdsStyleGame : MonoBehaviour
         CreateGround();
         CreateBackdrop();
 
-        slingshotAnchor = CreatePrimitive("Slingshot Anchor", new Vector2(-5.5f, -1.55f), new Vector2(0.18f, 1.9f), new Color(0.32f, 0.15f, 0.04f), false).transform;
+        GameObject slingshotPost = CreatePrimitive("Slingshot Anchor", new Vector2(-5.5f, -1.55f), new Vector2(0.18f, 1.9f), new Color(0.32f, 0.15f, 0.04f), false);
+        slingshotPost.GetComponent<Collider2D>().enabled = false;
+        slingshotAnchor = slingshotPost.transform;
         GameObject fork = CreatePrimitive("Slingshot Fork", new Vector2(-5.25f, -0.72f), new Vector2(0.9f, 0.18f), new Color(0.35f, 0.18f, 0.06f), false);
+        fork.GetComponent<Collider2D>().enabled = false;
         fork.transform.rotation = Quaternion.Euler(0f, 0f, 18f);
 
         GameObject lineObject = new("Launch Guide");
@@ -787,11 +790,14 @@ public class Bird : MonoBehaviour
 
 public class Destructible : MonoBehaviour
 {
+    private const float StartupArmDelay = 0.75f;
+
     private float health;
     private int scoreValue;
     private AngryBirdsStyleGame game;
     private Color particleColor;
     private float explosionRadius;
+    private float armedAt;
 
     public void Setup(float startingHealth, int score, AngryBirdsStyleGame owner, Color particles, float blastRadius)
     {
@@ -800,6 +806,7 @@ public class Destructible : MonoBehaviour
         game = owner;
         particleColor = particles;
         explosionRadius = blastRadius;
+        armedAt = Time.time + StartupArmDelay;
     }
 
     public void Damage(float amount)
@@ -813,6 +820,11 @@ public class Destructible : MonoBehaviour
 
     private void OnCollisionEnter2D(Collision2D collision)
     {
+        if (Time.time < armedAt)
+        {
+            return;
+        }
+
         Damage(collision.relativeVelocity.magnitude * 0.28f);
     }
 
