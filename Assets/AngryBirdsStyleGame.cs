@@ -792,12 +792,17 @@ public class Destructible : MonoBehaviour
 {
     private const float StartupArmDelay = 0.75f;
 
+    private static readonly List<Destructible> StablePieces = new();
+    private static bool structureReleased;
+
     private float health;
     private int scoreValue;
     private AngryBirdsStyleGame game;
     private Color particleColor;
     private float explosionRadius;
     private float armedAt;
+    private Rigidbody2D rb;
+    private RigidbodyConstraints2D originalConstraints;
 
     public void Setup(float startingHealth, int score, AngryBirdsStyleGame owner, Color particles, float blastRadius)
     {
@@ -807,10 +812,24 @@ public class Destructible : MonoBehaviour
         particleColor = particles;
         explosionRadius = blastRadius;
         armedAt = Time.time + StartupArmDelay;
+        structureReleased = false;
+        rb = GetComponent<Rigidbody2D>();
+        originalConstraints = rb.constraints;
+        rb.constraints = RigidbodyConstraints2D.FreezeAll;
+        if (!StablePieces.Contains(this))
+        {
+            StablePieces.Add(this);
+        }
     }
 
     public void Damage(float amount)
     {
+        if (Time.time < armedAt)
+        {
+            return;
+        }
+
+        ReleaseStructure();
         health -= amount;
         if (health <= 0f)
         {
@@ -826,6 +845,31 @@ public class Destructible : MonoBehaviour
         }
 
         Damage(collision.relativeVelocity.magnitude * 0.28f);
+    }
+
+    private void OnDestroy()
+    {
+        StablePieces.Remove(this);
+    }
+
+    private void ReleaseStructure()
+    {
+        if (structureReleased)
+        {
+            return;
+        }
+
+        structureReleased = true;
+        foreach (Destructible piece in StablePieces)
+        {
+            if (piece == null || piece.rb == null)
+            {
+                continue;
+            }
+
+            piece.rb.constraints = piece.originalConstraints;
+            piece.rb.WakeUp();
+        }
     }
 
     private void Break()
