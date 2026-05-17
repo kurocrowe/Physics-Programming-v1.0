@@ -5,8 +5,8 @@ using UnityEngine.UI;
 
 public class AngryBirdsStyleGame : MonoBehaviour
 {
-    private const float LaunchPower = 5.8f;
-    private const float MaxPullDistance = 2.8f;
+    private const float LaunchPower = 8.4f;
+    private const float MaxPullDistance = 3.35f;
 
     private readonly List<BirdData> birds = new();
     private readonly List<GameObject> activeEnemies = new();
@@ -876,7 +876,7 @@ public class Explosive : MonoBehaviour
 
     private void OnCollisionEnter2D(Collision2D collision)
     {
-        if (!exploded && collision.relativeVelocity.magnitude > 2.8f)
+        if (!exploded && collision.gameObject.GetComponent<Bird>() != null && collision.relativeVelocity.magnitude > 2.8f)
         {
             exploded = true;
             game.Explode(transform.position, radius, force);
