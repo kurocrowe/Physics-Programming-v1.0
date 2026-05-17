@@ -860,6 +860,7 @@ public class Destructible : MonoBehaviour
         }
 
         structureReleased = true;
+        Enemy.ReleaseTargets();
         foreach (Destructible piece in StablePieces)
         {
             if (piece == null || piece.rb == null)
@@ -893,16 +894,30 @@ public class Destructible : MonoBehaviour
 
 public class Enemy : MonoBehaviour
 {
+    private static readonly List<Enemy> StableTargets = new();
+    private static bool targetsReleased;
+
     private AngryBirdsStyleGame game;
     private float health = 2.2f;
+    private Rigidbody2D rb;
+    private RigidbodyConstraints2D originalConstraints;
 
     public void Setup(AngryBirdsStyleGame owner)
     {
         game = owner;
+        targetsReleased = false;
+        rb = GetComponent<Rigidbody2D>();
+        originalConstraints = rb.constraints;
+        rb.constraints = RigidbodyConstraints2D.FreezeAll;
+        if (!StableTargets.Contains(this))
+        {
+            StableTargets.Add(this);
+        }
     }
 
     public void Damage(float amount)
     {
+        ReleaseTargets();
         health -= amount;
         if (health <= 0f)
         {
@@ -912,7 +927,37 @@ public class Enemy : MonoBehaviour
 
     private void OnCollisionEnter2D(Collision2D collision)
     {
+        if (!targetsReleased && collision.gameObject.GetComponent<Bird>() == null)
+        {
+            return;
+        }
+
         Damage(collision.relativeVelocity.magnitude * 0.35f);
+    }
+
+    private void OnDestroy()
+    {
+        StableTargets.Remove(this);
+    }
+
+    public static void ReleaseTargets()
+    {
+        if (targetsReleased)
+        {
+            return;
+        }
+
+        targetsReleased = true;
+        foreach (Enemy target in StableTargets)
+        {
+            if (target == null || target.rb == null)
+            {
+                continue;
+            }
+
+            target.rb.constraints = target.originalConstraints;
+            target.rb.WakeUp();
+        }
     }
 }
 
