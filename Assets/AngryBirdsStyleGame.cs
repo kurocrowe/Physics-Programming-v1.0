@@ -407,7 +407,7 @@ public class AngryBirdsStyleGame : MonoBehaviour
             $"Score: {score}\n" +
             $"Enemies left: {enemiesLeft}\n" +
             $"Bird: {activeBirdName}  | Birds left: {Mathf.Max(0, birds.Count - birdIndex)}\n" +
-            "Drag the bird, release to launch. Click or Space after launch for special ability. R restarts.";
+            "Drag the bird, release to launch. Click or Space after launch for special \n ability. R restarts.";
     }
 
     private void CheckRoundState()
