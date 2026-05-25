@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
-
+using UnityEngine.EventSystems;
 public class AngryBirdsStyleGame : MonoBehaviour
 {
     private const float LaunchPower = 8.4f;
@@ -12,6 +12,7 @@ public class AngryBirdsStyleGame : MonoBehaviour
     private readonly List<GameObject> activeEnemies = new();
     private readonly List<GameObject> activeObjects = new();
     private readonly List<LevelData> levels = new();
+    private readonly List<MenuChoice> menuChoices = new();
 
     private Camera mainCamera;
     private Transform slingshotAnchor;
@@ -21,13 +22,18 @@ public class AngryBirdsStyleGame : MonoBehaviour
     private GameObject currentBird;
     private Rigidbody2D currentBirdBody;
     private Bird currentBirdScript;
+    private GameObject menuSceneRoot;
     private bool dragging;
     private bool launched;
     private int levelIndex;
     private int birdIndex;
     private int score;
     private float settleTimer;
-
+    private Transform uiRoot;
+    private GameObject menuRoot;
+    private bool showingMenu = true;
+    private int hoveredMenuChoice = -1;
+    private float menuAnimTime;
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void StartGame()
     {
@@ -46,11 +52,18 @@ public class AngryBirdsStyleGame : MonoBehaviour
         SetupCamera();
         ClearOldGameplay();
         BuildUi();
-        LoadLevel(0);
+        ShowMainMenu();
     }
 
     private void Update()
     {
+        if (showingMenu)
+        {
+            menuAnimTime += Time.deltaTime;
+            AnimateMenu();
+            HandleMenuMouse();
+            return;
+        }
         HandleInput();
         UpdateCamera();
         UpdateHud();
@@ -152,38 +165,306 @@ public class AngryBirdsStyleGame : MonoBehaviour
     private void BuildUi()
     {
         GameObject canvasObject = new("Game UI");
+        uiRoot = canvasObject.transform;
         Canvas canvas = canvasObject.AddComponent<Canvas>();
         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = 100;
         canvasObject.AddComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
         canvasObject.AddComponent<GraphicRaycaster>();
 
         hudText = CreateText(canvasObject.transform, "HUD", new Vector2(12f, -12f), TextAnchor.UpperLeft, 22, Color.white);
         messageText = CreateText(canvasObject.transform, "Message", new Vector2(0f, -18f), TextAnchor.UpperCenter, 30, new Color(1f, 0.94f, 0.42f));
         messageText.text = string.Empty;
+        EnsureEventSystem();
+    }
+    private void EnsureEventSystem()
+    {
+        if (FindObjectOfType<EventSystem>() != null)
+        {
+            return;
+        }
+
+        GameObject eventSystem = new("EventSystem");
+        eventSystem.AddComponent<EventSystem>();
+        eventSystem.AddComponent<StandaloneInputModule>();
+    }
+    private void ShowMainMenu()
+    {
+        showingMenu = true;
+        mainCamera.transform.position = new Vector3(0f, 0f, -10f);
+        mainCamera.orthographicSize = 5.2f;
+        mainCamera.backgroundColor = new Color(0.36f, 0.68f, 0.96f);
+
+        if (hudText != null)
+        {
+            hudText.enabled = false;
+        }
+
+        if (messageText != null)
+        {
+            messageText.enabled = false;
+        }
+
+        BuildMenuScene();
+
+        menuRoot = new GameObject("Main Menu");
+        menuRoot.transform.SetParent(uiRoot, false);
+
+        RectTransform menuRect = menuRoot.AddComponent<RectTransform>();
+        menuRect.anchorMin = Vector2.zero;
+        menuRect.anchorMax = Vector2.one;
+        menuRect.offsetMin = Vector2.zero;
+        menuRect.offsetMax = Vector2.zero;
+
+        Text title = CreateText(menuRoot.transform, "Title", new Vector2(0f, -65f), TextAnchor.UpperCenter, 60, new Color(1f, 0.9f, 0.18f));
+        title.text = "Angry Physics";
+        title.fontStyle = FontStyle.Bold;
+
+        Text subtitle = CreateText(menuRoot.transform, "Subtitle", new Vector2(0f, -135f), TextAnchor.UpperCenter, 24, Color.white);
+        subtitle.text = "Move the mouse over a button and click to start";
+
+        CreateMenuButton("Play", new Vector2(0f, -220f), () => StartFromMenu(0));
+        CreateMenuButton("Training Field", new Vector2(0f, -285f), () => StartFromMenu(0));
+        CreateMenuButton("Glass Ridge", new Vector2(0f, -350f), () => StartFromMenu(1));
+        CreateMenuButton("Fort Boom", new Vector2(0f, -415f), () => StartFromMenu(2));
+        CreateMenuButton("Quit", new Vector2(0f, -500f), Application.Quit);
     }
 
+    private void StartFromMenu(int startLevel)
+    {
+        showingMenu = false;
+
+        if (menuRoot != null)
+        {
+            Destroy(menuRoot);
+            menuRoot = null;
+        }
+
+        if (menuSceneRoot != null)
+        {
+            Destroy(menuSceneRoot);
+            menuSceneRoot = null;
+        }
+
+        hudText.enabled = true;
+        messageText.enabled = true;
+        LoadLevel(startLevel);
+    }
+
+    private void BuildMenuScene()
+    {
+        if (menuSceneRoot != null)
+        {
+            Destroy(menuSceneRoot);
+        }
+
+        menuChoices.Clear();
+        hoveredMenuChoice = -1;
+        menuSceneRoot = new GameObject("Main Menu Scene");
+
+        GameObject grass = CreatePrimitive("Menu Grass", new Vector2(0f, -3.25f), new Vector2(14f, 0.7f), new Color(0.25f, 0.62f, 0.24f), false);
+        grass.transform.SetParent(menuSceneRoot.transform, true);
+        grass.GetComponent<Collider2D>().enabled = false;
+
+        GameObject dirt = CreatePrimitive("Menu Dirt", new Vector2(0f, -3.72f), new Vector2(14f, 0.35f), new Color(0.44f, 0.25f, 0.12f), false);
+        dirt.transform.SetParent(menuSceneRoot.transform, true);
+        dirt.GetComponent<Collider2D>().enabled = false;
+
+        GameObject sun = CreateCircle("Menu Sun", new Vector2(-4.5f, 2.85f), 0.65f, new Color(1f, 0.84f, 0.22f), false);
+        sun.transform.SetParent(menuSceneRoot.transform, true);
+        sun.GetComponent<Collider2D>().enabled = false;
+
+        GameObject bird = CreateCircle("Menu Bird", new Vector2(-2.25f, -2.45f), 0.42f, new Color(0.95f, 0.15f, 0.1f), false);
+        bird.transform.SetParent(menuSceneRoot.transform, true);
+        bird.GetComponent<Collider2D>().enabled = false;
+
+        GameObject blockA = CreatePrimitive("Menu Block A", new Vector2(2.2f, -2.45f), new Vector2(0.35f, 1.15f), new Color(0.62f, 0.36f, 0.15f), false);
+        blockA.transform.SetParent(menuSceneRoot.transform, true);
+        blockA.GetComponent<Collider2D>().enabled = false;
+
+        GameObject blockB = CreatePrimitive("Menu Block B", new Vector2(3.05f, -2.45f), new Vector2(0.35f, 1.15f), new Color(0.62f, 0.36f, 0.15f), false);
+        blockB.transform.SetParent(menuSceneRoot.transform, true);
+        blockB.GetComponent<Collider2D>().enabled = false;
+
+        GameObject roof = CreatePrimitive("Menu Roof", new Vector2(2.62f, -1.78f), new Vector2(1.25f, 0.28f), new Color(0.45f, 0.85f, 1f, 0.86f), false);
+        roof.transform.SetParent(menuSceneRoot.transform, true);
+        roof.GetComponent<Collider2D>().enabled = false;
+
+        AddMenuChoice("Play", 0, new Vector2(0f, 0.2f), new Color(0.94f, 0.24f, 0.13f));
+        AddMenuChoice("Training", 0, new Vector2(0f, -0.55f), new Color(0.3f, 0.72f, 0.3f));
+        AddMenuChoice("Water Level", 1, new Vector2(0f, -1.3f), new Color(0.18f, 0.5f, 1f));
+        AddMenuChoice("Fort Boom", 2, new Vector2(0f, -2.05f), new Color(0.48f, 0.42f, 0.9f));
+    }
+
+    private void AddMenuChoice(string label, int targetLevel, Vector2 position, Color color)
+    {
+        GameObject button = CreatePrimitive(label + " Menu Button", position, new Vector2(2.8f, 0.46f), color, false);
+        button.transform.SetParent(menuSceneRoot.transform, true);
+        button.GetComponent<Collider2D>().enabled = false;
+        SpriteRenderer renderer = button.GetComponent<SpriteRenderer>();
+        renderer.sortingOrder = 5;
+
+        GameObject labelObject = new(label + " Menu Label");
+        labelObject.transform.SetParent(menuSceneRoot.transform, true);
+        labelObject.transform.position = new Vector3(position.x, position.y - 0.04f, -0.1f);
+        labelObject.transform.localScale = Vector3.one;
+        TextMesh labelText = labelObject.AddComponent<TextMesh>();
+        labelText.text = label;
+        labelText.anchor = TextAnchor.MiddleCenter;
+        labelText.alignment = TextAlignment.Center;
+        labelText.characterSize = 0.13f;
+        labelText.fontSize = 72;
+        labelText.color = Color.white;
+        MeshRenderer labelRenderer = labelObject.GetComponent<MeshRenderer>();
+        labelRenderer.sortingOrder = 6;
+
+        menuChoices.Add(new MenuChoice(label, targetLevel, button, labelObject, renderer, color, position));
+    }
+
+    private void AnimateMenu()
+    {
+        if (menuSceneRoot == null)
+        {
+            return;
+        }
+
+        foreach (Transform child in menuSceneRoot.transform)
+        {
+            if (child.name == "Menu Bird")
+            {
+                child.position = new Vector3(-2.25f + Mathf.Sin(menuAnimTime * 2.4f) * 0.18f, -2.45f + Mathf.Sin(menuAnimTime * 3.1f) * 0.12f, 0f);
+                child.rotation = Quaternion.Euler(0f, 0f, Mathf.Sin(menuAnimTime * 4f) * 8f);
+            }
+            else if (child.name == "Menu Sun")
+            {
+                float pulse = 1f + Mathf.Sin(menuAnimTime * 1.8f) * 0.05f;
+                child.localScale = Vector3.one * 1.3f * pulse;
+            }
+            else if (child.name.Contains("Menu Block") || child.name == "Menu Roof")
+            {
+                child.rotation = Quaternion.Euler(0f, 0f, Mathf.Sin(menuAnimTime * 1.7f + child.position.x) * 2f);
+            }
+        }
+
+        for (int i = 0; i < menuChoices.Count; i++)
+        {
+            MenuChoice choice = menuChoices[i];
+            float hoverScale = i == hoveredMenuChoice ? 1.12f : 1f;
+            float bob = Mathf.Sin(menuAnimTime * 2.2f + i * 0.75f) * 0.035f;
+            choice.Button.transform.position = choice.HomePosition + new Vector2(0f, bob);
+            choice.Button.transform.localScale = new Vector3(2.8f * hoverScale, 0.46f * hoverScale, 1f);
+            choice.LabelObject.transform.position = choice.HomePosition + new Vector2(0f, bob - 0.04f);
+            choice.LabelObject.transform.localScale = Vector3.one * hoverScale;
+            choice.Renderer.color = i == hoveredMenuChoice ? Color.Lerp(choice.BaseColor, Color.white, 0.25f) : choice.BaseColor;
+        }
+    }
+
+    private void HandleMenuMouse()
+    {
+        Vector2 pointerWorld = mainCamera.ScreenToWorldPoint(Input.mousePosition);
+        hoveredMenuChoice = -1;
+
+        for (int i = 0; i < menuChoices.Count; i++)
+        {
+            if (menuChoices[i].Contains(pointerWorld))
+            {
+                hoveredMenuChoice = i;
+                break;
+            }
+        }
+
+        if (hoveredMenuChoice < 0 || !Input.GetMouseButtonDown(0))
+        {
+            return;
+        }
+
+        StartFromMenu(menuChoices[hoveredMenuChoice].TargetLevel);
+    }
+
+    private Button CreateMenuButton(string label, Vector2 position, UnityEngine.Events.UnityAction action)
+    {
+        GameObject buttonObject = new(label + " Button");
+        buttonObject.transform.SetParent(menuRoot.transform, false);
+
+        RectTransform rect = buttonObject.AddComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.5f, 1f);
+        rect.anchorMax = new Vector2(0.5f, 1f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.anchoredPosition = position;
+        rect.sizeDelta = new Vector2(300f, 48f);
+
+        Text text = buttonObject.AddComponent<Text>();
+        text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        if (text.font == null)
+        {
+            text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
+        }
+
+        text.text = label;
+        text.fontSize = 26;
+        text.fontStyle = FontStyle.Bold;
+        text.alignment = TextAnchor.MiddleCenter;
+        text.color = Color.white;
+        text.raycastTarget = true;
+
+        Button button = buttonObject.AddComponent<Button>();
+        button.targetGraphic = text;
+        button.onClick.AddListener(action);
+
+        ColorBlock colors = button.colors;
+        colors.normalColor = Color.white;
+        colors.highlightedColor = new Color(1f, 0.88f, 0.22f);
+        colors.pressedColor = new Color(1f, 0.42f, 0.25f);
+        colors.selectedColor = new Color(1f, 0.88f, 0.22f);
+        button.colors = colors;
+
+        return button;
+    }
     private Text CreateText(Transform parent, string name, Vector2 anchoredPosition, TextAnchor anchor, int size, Color color)
     {
         GameObject textObject = new(name);
         textObject.transform.SetParent(parent, false);
+
         Text text = textObject.AddComponent<Text>();
         text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
         if (text.font == null)
         {
             text.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
         }
+
         text.fontSize = size;
         text.alignment = anchor;
         text.color = color;
-        text.horizontalOverflow = HorizontalWrapMode.Overflow;
+        text.horizontalOverflow = HorizontalWrapMode.Wrap;
         text.verticalOverflow = VerticalWrapMode.Overflow;
+        text.resizeTextForBestFit = false;
+        text.raycastTarget = false;
 
         RectTransform rect = text.GetComponent<RectTransform>();
-        rect.anchorMin = anchor == TextAnchor.UpperLeft ? new Vector2(0f, 1f) : new Vector2(0.5f, 1f);
+        bool leftAligned = anchor == TextAnchor.UpperLeft;
+
+        rect.anchorMin = leftAligned ? new Vector2(0f, 1f) : new Vector2(0.5f, 1f);
         rect.anchorMax = rect.anchorMin;
-        rect.pivot = anchor == TextAnchor.UpperLeft ? new Vector2(0f, 1f) : new Vector2(0.5f, 1f);
+        rect.pivot = leftAligned ? new Vector2(0f, 1f) : new Vector2(0.5f, 1f);
         rect.anchoredPosition = anchoredPosition;
-        rect.sizeDelta = new Vector2(900f, 120f);
+
+        if (name == "Title")
+        {
+            rect.sizeDelta = new Vector2(520f, 76f);
+        }
+        else if (name == "Subtitle")
+        {
+            rect.sizeDelta = new Vector2(620f, 48f);
+        }
+        else if (name == "HUD")
+        {
+            rect.sizeDelta = new Vector2(620f, 150f);
+        }
+        else
+        {
+            rect.sizeDelta = new Vector2(620f, 90f);
+        }
+
         return text;
     }
 
@@ -221,6 +502,14 @@ public class AngryBirdsStyleGame : MonoBehaviour
     {
         CreateGround();
         CreateBackdrop();
+        if (levelIndex == 1)
+        {
+            CreateWater();
+        }
+        else if (levelIndex == 2)
+        {
+            CreateWaterfall();
+        }
 
         GameObject slingshotPost = CreatePrimitive("Slingshot Anchor", new Vector2(-5.5f, -1.55f), new Vector2(0.18f, 1.9f), new Color(0.32f, 0.15f, 0.04f), false);
         slingshotPost.GetComponent<Collider2D>().enabled = false;
@@ -276,7 +565,73 @@ public class AngryBirdsStyleGame : MonoBehaviour
         GameObject dirt = CreatePrimitive("Dirt", new Vector2(2.8f, -3.8f), new Vector2(18f, 0.35f), new Color(0.45f, 0.25f, 0.11f), false);
         dirt.GetComponent<Collider2D>().enabled = false;
     }
+    private void CreateWater()
+    {
+        GameObject water = CreatePrimitive("Water", new Vector2(7.9f, -3.22f), new Vector2(3.6f, 0.86f), new Color(0.2f, 0.55f, 1f, 0.48f), false);
+        BoxCollider2D waterCollider = water.GetComponent<BoxCollider2D>();
+        waterCollider.isTrigger = true;
+        waterCollider.usedByEffector = true;
+        BuoyancyEffector2D buoyancy = water.AddComponent<BuoyancyEffector2D>();
+        buoyancy.surfaceLevel = 0.42f;
+        buoyancy.density = 0.9f;
+        buoyancy.linearDamping = 3.5f;
+        buoyancy.angularDamping = 2.4f;
+        buoyancy.flowAngle = 0f;
+        buoyancy.flowMagnitude = 0.03f;
+        water.AddComponent<StableWaterZone>();
+        water.GetComponent<SpriteRenderer>().sortingOrder = -1;
+    }
 
+    private void CreateWaterfall()
+    {
+        GameObject pool = CreatePrimitive("Waterfall Pool", new Vector2(3.2f, -3.18f), new Vector2(4.1f, 0.96f), new Color(0.16f, 0.55f, 1f, 0.5f), false);
+        BoxCollider2D poolCollider = pool.GetComponent<BoxCollider2D>();
+        poolCollider.isTrigger = true;
+        poolCollider.usedByEffector = true;
+        BuoyancyEffector2D poolBuoyancy = pool.AddComponent<BuoyancyEffector2D>();
+        poolBuoyancy.surfaceLevel = 0.46f;
+        poolBuoyancy.density = 0.85f;
+        poolBuoyancy.linearDamping = 3.8f;
+        poolBuoyancy.angularDamping = 2.6f;
+        poolBuoyancy.flowAngle = 0f;
+        poolBuoyancy.flowMagnitude = 0.04f;
+        pool.AddComponent<StableWaterZone>();
+        pool.GetComponent<SpriteRenderer>().sortingOrder = -2;
+
+        float waterfallAngle = -28f;
+        GameObject falls = CreatePrimitive("Waterfall Flow", new Vector2(3.85f, -0.75f), new Vector2(0.82f, 4.45f), new Color(0.22f, 0.68f, 1f, 0.62f), false);
+        falls.transform.rotation = Quaternion.Euler(0f, 0f, waterfallAngle);
+        BoxCollider2D fallsCollider = falls.GetComponent<BoxCollider2D>();
+        fallsCollider.isTrigger = true;
+        fallsCollider.usedByEffector = true;
+        AreaEffector2D downwardFlow = falls.AddComponent<AreaEffector2D>();
+        downwardFlow.forceAngle = -90f + waterfallAngle;
+        downwardFlow.forceMagnitude = 4.5f;
+        downwardFlow.linearDamping = 2.2f;
+        downwardFlow.angularDamping = 1.4f;
+        WaterfallFlow waterfallFlow = falls.AddComponent<WaterfallFlow>();
+        waterfallFlow.Setup(4.8f, 3.8f, waterfallAngle);
+        falls.GetComponent<SpriteRenderer>().sortingOrder = -1;
+
+        for (int i = 0; i < 5; i++)
+        {
+            GameObject streak = CreatePrimitive("Waterfall Streak", new Vector2(3.58f + i * 0.14f, -0.75f), new Vector2(0.055f, 4.2f), new Color(0.78f, 0.94f, 1f, 0.54f), false);
+            streak.transform.rotation = Quaternion.Euler(0f, 0f, waterfallAngle);
+            streak.GetComponent<Collider2D>().enabled = false;
+            streak.GetComponent<SpriteRenderer>().sortingOrder = 0;
+            WaterfallStreak streakAnim = streak.AddComponent<WaterfallStreak>();
+            streakAnim.Setup(i * 0.45f, 4.2f, waterfallAngle);
+        }
+
+        for (int i = 0; i < 6; i++)
+        {
+            GameObject foam = CreateCircle("Waterfall Foam", new Vector2(2.9f + i * 0.25f, -2.82f + Mathf.Sin(i) * 0.08f), 0.12f, new Color(0.88f, 0.97f, 1f, 0.74f), false);
+            foam.GetComponent<Collider2D>().enabled = false;
+            foam.GetComponent<SpriteRenderer>().sortingOrder = 1;
+            WaterfallFoam foamAnim = foam.AddComponent<WaterfallFoam>();
+            foamAnim.Setup(i * 0.55f);
+        }
+    }
     private void CreateBlock(BlockSpec block)
     {
         GameObject blockObject = CreatePrimitive(block.MaterialName + " Block", block.Position, block.Size, block.Color, true);
@@ -584,6 +939,43 @@ public class AngryBirdsStyleGame : MonoBehaviour
         }
         activeObjects.Add(obj);
         return obj;
+    }
+
+    private readonly struct MenuChoice
+    {
+        public readonly string Label;
+        public readonly int TargetLevel;
+        public readonly GameObject Button;
+        public readonly GameObject LabelObject;
+        public readonly SpriteRenderer Renderer;
+        public readonly Color BaseColor;
+        public readonly Vector2 HomePosition;
+
+        public MenuChoice(string label, int targetLevel, GameObject button, GameObject labelObject, SpriteRenderer renderer, Color baseColor, Vector2 homePosition)
+        {
+            Label = label;
+            TargetLevel = targetLevel;
+            Button = button;
+            LabelObject = labelObject;
+            Renderer = renderer;
+            BaseColor = baseColor;
+            HomePosition = homePosition;
+        }
+
+        public bool Contains(Vector2 point)
+        {
+            if (Button == null)
+            {
+                return false;
+            }
+
+            Vector2 center = Button.transform.position;
+            Vector2 size = Button.transform.localScale;
+            return point.x >= center.x - size.x * 0.5f &&
+                   point.x <= center.x + size.x * 0.5f &&
+                   point.y >= center.y - size.y * 0.5f &&
+                   point.y <= center.y + size.y * 0.5f;
+        }
     }
 
     private readonly struct BirdData
@@ -983,5 +1375,161 @@ public class Explosive : MonoBehaviour
             game.Explode(transform.position, radius, force);
             Destroy(gameObject);
         }
+    }
+}
+
+public class StableWaterZone : MonoBehaviour
+{
+    private const float SurfacePadding = 0.08f;
+    private const float BuoyancyForce = 5.2f;
+    private const float MaxRiseSpeed = 2.2f;
+    private const float MaxHorizontalSpeed = 5.5f;
+    private const float MaxSpin = 260f;
+
+    private BoxCollider2D waterCollider;
+
+    private void Awake()
+    {
+        waterCollider = GetComponent<BoxCollider2D>();
+    }
+
+    private void OnTriggerStay2D(Collider2D other)
+    {
+        Rigidbody2D body = other.attachedRigidbody;
+        if (body == null || body.bodyType != RigidbodyType2D.Dynamic)
+        {
+            return;
+        }
+
+        Bounds waterBounds = waterCollider.bounds;
+        Bounds bodyBounds = other.bounds;
+        float waterSurface = waterBounds.max.y - SurfacePadding;
+        float submergedDepth = Mathf.Clamp01((waterSurface - bodyBounds.min.y) / Mathf.Max(bodyBounds.size.y, 0.01f));
+        if (submergedDepth <= 0f)
+        {
+            return;
+        }
+
+        body.AddForce(Vector2.up * (BuoyancyForce * body.mass * submergedDepth), ForceMode2D.Force);
+
+        Vector2 velocity = body.linearVelocity;
+        velocity.x = Mathf.Clamp(velocity.x * 0.985f, -MaxHorizontalSpeed, MaxHorizontalSpeed);
+        velocity.y = Mathf.Clamp(velocity.y, -MaxRiseSpeed, MaxRiseSpeed);
+        body.linearVelocity = velocity;
+        body.angularVelocity = Mathf.Clamp(body.angularVelocity * 0.96f, -MaxSpin, MaxSpin);
+    }
+}
+
+public class WaterfallFlow : MonoBehaviour
+{
+    private const float EntryPush = 1.2f;
+    private const float SidewaysDamping = 0.08f;
+
+    private float downwardForce;
+    private float maxFallSpeed;
+    private Vector2 flowDirection = Vector2.down;
+
+    public void Setup(float force, float maxSpeed, float angleDegrees)
+    {
+        downwardForce = force;
+        maxFallSpeed = maxSpeed;
+        flowDirection = Quaternion.Euler(0f, 0f, angleDegrees) * Vector2.down;
+    }
+
+    private void OnTriggerEnter2D(Collider2D other)
+    {
+        Rigidbody2D body = other.attachedRigidbody;
+        if (body == null || body.bodyType != RigidbodyType2D.Dynamic)
+        {
+            return;
+        }
+
+        body.AddForce(flowDirection * (EntryPush * body.mass), ForceMode2D.Impulse);
+        ApplyFlowVelocity(body);
+    }
+
+    private void OnTriggerStay2D(Collider2D other)
+    {
+        Rigidbody2D body = other.attachedRigidbody;
+        if (body == null || body.bodyType != RigidbodyType2D.Dynamic)
+        {
+            return;
+        }
+
+        body.AddForce(flowDirection * (downwardForce * body.mass), ForceMode2D.Force);
+        ApplyFlowVelocity(body);
+    }
+
+    private void ApplyFlowVelocity(Rigidbody2D body)
+    {
+        Vector2 velocity = body.linearVelocity;
+        float speedAlongFlow = Vector2.Dot(velocity, flowDirection);
+        if (speedAlongFlow < 0.6f)
+        {
+            velocity += flowDirection * (0.6f - speedAlongFlow);
+        }
+
+        speedAlongFlow = Vector2.Dot(velocity, flowDirection);
+        if (speedAlongFlow > maxFallSpeed)
+        {
+            velocity -= flowDirection * (speedAlongFlow - maxFallSpeed);
+        }
+
+        Vector2 sideways = new Vector2(-flowDirection.y, flowDirection.x);
+        velocity -= sideways * (Vector2.Dot(velocity, sideways) * SidewaysDamping);
+        body.linearVelocity = velocity;
+        body.angularVelocity = Mathf.Clamp(body.angularVelocity * 0.97f, -240f, 240f);
+    }
+}
+
+public class WaterfallStreak : MonoBehaviour
+{
+    private Vector3 startPosition;
+    private float phase;
+    private float height;
+    private Vector3 flowDirection = Vector3.down;
+
+    public void Setup(float startPhase, float streakHeight, float angleDegrees)
+    {
+        phase = startPhase;
+        height = streakHeight;
+        flowDirection = Quaternion.Euler(0f, 0f, angleDegrees) * Vector3.down;
+    }
+
+    private void Start()
+    {
+        startPosition = transform.position;
+    }
+
+    private void Update()
+    {
+        float cycle = Mathf.Repeat(Time.time * 1.8f + phase, 1f);
+        transform.position = startPosition + flowDirection * ((cycle - 0.5f) * height * 0.22f);
+        Color color = GetComponent<SpriteRenderer>().color;
+        color.a = 0.32f + Mathf.Sin(Time.time * 5.5f + phase) * 0.16f;
+        GetComponent<SpriteRenderer>().color = color;
+    }
+}
+
+public class WaterfallFoam : MonoBehaviour
+{
+    private Vector3 startPosition;
+    private float phase;
+
+    public void Setup(float startPhase)
+    {
+        phase = startPhase;
+    }
+
+    private void Start()
+    {
+        startPosition = transform.position;
+    }
+
+    private void Update()
+    {
+        float pulse = 1f + Mathf.Sin(Time.time * 3.8f + phase) * 0.22f;
+        transform.localScale = Vector3.one * 0.24f * pulse;
+        transform.position = startPosition + new Vector3(Mathf.Sin(Time.time * 2.4f + phase) * 0.08f, Mathf.Cos(Time.time * 2.7f + phase) * 0.035f, 0f);
     }
 }
